@@ -1,5 +1,5 @@
 """
-this module provides the general "project management" functionality within mog
+this package provides the general "project management" functionality within mog
 """
 
 
@@ -9,6 +9,7 @@ import os
 
 
 class Project(object):
+    """Represents a mog project"""
 
     def __init__(self, path):
         self._basepath = os.path.abspath(path)
@@ -35,6 +36,7 @@ class Project(object):
 
 
 class ProjectFile(object):
+    """Convenience utility that represents the project file in a mog project directory"""
 
     def __init__(self):
         self._blob = {}

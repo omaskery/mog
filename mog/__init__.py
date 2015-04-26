@@ -7,3 +7,4 @@ this package provides functionality for parsing and transpiling the made up lang
 
 from . import arg_helpers
 from . import project
+from . import gamemaker
