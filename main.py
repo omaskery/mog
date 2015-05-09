@@ -32,25 +32,28 @@ def mog_init(args):
 def mog_scan(args):
     """handles the `mog scan` command"""
 
-    if not mog.project.Project.already_exists(args.path):
+    base_path = args.path
+
+    if not mog.project.Project.already_exists(base_path):
         print("no mog project found in specified directory")
         return
 
-    project = mog.project.Project(args.path)
+    project = mog.project.Project(base_path)
 
-    # everything below here is testing and unfinished...
-
-    print("scanning '{}'".format(project.project_file.gamemaker_project_path))
+    print("scanning game maker project {}...".format(project.project_file.gamemaker_project_path))
     gm_project = mog.gamemaker.project.Project(project.project_file.gamemaker_project_path)
-    print("objects:")
     for object in gm_project.objects:
-        print("  Object({})".format(object.name))
-        for event in object.events:
-            print("    Event({}, {}):".format(event.type_name, event.number))
-            for action in event.code_actions:
-                print("      Code Action ({}):\n{}".format(
-                    action['whoName'], action['code']
-                ))
+        object_path = mog.source.generator.generate_object_path(base_path, object)
+        if not os.path.exists(object_path):
+            print("  generating mog file for game maker object {}".format(object.name))
+            mog.source.generator.generate_object_file(base_path, object)
+        else:
+            parse_result = mog.source.parser.parse(open(object_path, 'r'), object_path)
+            print("  existing mog file:\n    ast:\n{}".format(parse_result.ast.pretty_print(3, 2)))
+            if len(parse_result.messages) > 0:
+                print("    parser output:")
+                for message in parse_result.messages:
+                    print("      {}".format(message))
 
 
 def parse_args():

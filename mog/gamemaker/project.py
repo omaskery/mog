@@ -57,6 +57,15 @@ class GameObject(object):
     def path(self):
         return self._path
 
+    @property
+    def parent_name(self):
+        element = self._contents.find(".//parentName")
+        if element is not None and element.text != "<undefined>":
+            result = element.text
+        else:
+            result = None
+        return result
+
     def __str__(self):
         return "GameObject({})".format(self._name)
 
