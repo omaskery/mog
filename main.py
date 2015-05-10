@@ -56,6 +56,37 @@ def mog_scan(args):
                     print("      {}".format(message))
 
 
+def mog_build(args):
+    """handles the `mog build` command"""
+
+    base_path = args.path
+
+    if not mog.project.Project.already_exists(base_path):
+        print("no mog project found in specified directory")
+        return
+
+    project = mog.project.Project(base_path)
+    success = True
+
+    for filename in filter(lambda x: x.endswith(".mog"), os.listdir(base_path)):
+        print("transpiling {}".format(filename))
+        filepath = os.path.join(base_path, filename)
+        parse_result = mog.source.parser.parse(open(filepath, 'r'), filename)
+        for message in parse_result.messages:
+            print("  parser - {}".format(message))
+        if parse_result.is_success():
+            transpiler = mog.transpiler.Transpiler()
+            transpiler.compile(parse_result.ast)
+            for message in transpiler.messages:
+                print("  transpiler - {}".format(message))
+            transpiler.debug_types()
+        else:
+            success = False
+
+    if not success:
+        print("build unsuccessful")
+
+
 def parse_args():
     """configures the argument parser and parses the command line arguments"""
 
@@ -91,6 +122,16 @@ def parse_args():
         help='the path of the directory containing the mog project'
     )
     parser_scan.set_defaults(func=mog_scan)
+
+    # mog build
+    parser_build = subparsers.add_parser(
+        'build', help='builds the mog project'
+    )
+    parser_build.add_argument(
+        '--path', default='.',
+        help='the path of the directory containing the mog project'
+    )
+    parser_build.set_defaults(func=mog_build)
 
     # go go go
     return parser.parse_args()

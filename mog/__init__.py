@@ -9,3 +9,4 @@ from . import arg_helpers
 from . import project
 from . import gamemaker
 from . import source
+from . import transpiler

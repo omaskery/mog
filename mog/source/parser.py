@@ -141,7 +141,7 @@ class Parser(object):
             comment = self.consume_until(lambda x: x == '\n', True)
             if self.peek() == '\n':
                 self.get()
-            result = ast.CommentNode(self.position, comment)
+            result = ast.CommentNode(start_position, comment)
         return result
 
     def peek(self) -> str:
@@ -283,6 +283,12 @@ class ParserResult(object):
 
     def fatal_error(self, contents, origin):
         self.report(ParserMessage.FATAL_ERROR, contents, origin)
+
+    def is_success(self):
+        return all([
+            message.type not in (ParserMessage.ERROR, ParserMessage.FATAL_ERROR)
+            for message in self.messages
+        ])
 
 
 def parse(file, filename):

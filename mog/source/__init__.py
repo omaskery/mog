@@ -1,5 +1,5 @@
 """
-this package provides the the custom language functionality within mog
+this package provides the the custom language parsing and generation within mog
 """
 
 from . import parser
