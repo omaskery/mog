@@ -3,6 +3,9 @@ this module provides the code source abstraction (for reading source code in)
 """
 
 
+import copy
+
+
 class SourcePoint(object):
 
     def __init__(self, source_name, line=0, column=0):
@@ -22,8 +25,11 @@ class SourcePoint(object):
     def column(self):
         return self._column
 
-    def advance_by(self, byte):
-        if chr(byte) == '\n':
+    def clone(self):
+        return copy.copy(self)
+
+    def advance_by(self, letter):
+        if letter == '\n':
             self._line += 1
             self._column = 0
             result = True
@@ -32,8 +38,8 @@ class SourcePoint(object):
             result = False
         return result
 
-    def rewind_by(self, byte, last_column=0):
-        if chr(byte) == '\n':
+    def rewind_by(self, letter, last_column=0):
+        if letter == '\n':
             self._column = last_column
             self._line -= 1
         else:
@@ -44,7 +50,7 @@ class AbstractSource(object):
 
     def __init__(self, source_name):
         self._position = SourcePoint(source_name)
-        self._buffered = b""
+        self._buffered = ""
 
     def _read(self, amount):
         _ = self, amount
@@ -57,11 +63,15 @@ class AbstractSource(object):
 
     @property
     def position(self):
-        return self._position
+        return self._position.clone()
 
     @property
     def source_name(self):
         return self.position.source_name
+
+    def is_eof(self):
+        self._fill_buffer()
+        return len(self._buffered) < 1
 
     def peek(self):
         self._fill_buffer()
@@ -79,8 +89,8 @@ class AbstractSource(object):
         return result
 
     def put(self, contents):
-        for byte in contents:
-            self._position.rewind_by(byte)
+        for letter in contents:
+            self._position.rewind_by(letter)
         self._buffered = contents + self._buffered
 
 
