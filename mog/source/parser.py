@@ -150,8 +150,8 @@ class Parser(object):
     def get(self) -> str:
         return self._src.get()
 
-    def recover_scoped(self, scope_open, scope_close, message):
-        scope = 1
+    def recover_scoped(self, scope_open, scope_close, message, initial_scope = 1):
+        scope = initial_scope
         while self.peek() is not None:
             next = self.get()
             if next == scope_open:
@@ -215,8 +215,7 @@ class Parser(object):
                     self.parse_event(obj, position)
                 else:
                     self.error("unexpected identifier '{}'".format(identifier))
-                    self.recover_scoped("{", "}", "attempting to resume parsing after bad object definition")
-                    break
+                    self.recover_scoped("{", "}", "attempting to resume parsing after bad method/member/event definition", 0)
                 self.skip_whitespace()
             if self.peek() == "}":
                 self.get()

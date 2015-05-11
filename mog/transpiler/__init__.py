@@ -33,6 +33,22 @@ class TranspilerMessage(namedtuple('TranspilerMessage', 'type contents origin'))
         }[message_type]
 
 
+class FatalTranspilerError(Exception):
+
+    def __init__(self, contents, origin):
+        super().__init__()
+        self._contents = contents
+        self._origin = origin
+
+    @property
+    def contents(self):
+        return self._contents
+
+    @property
+    def origin(self):
+        return self._origin
+
+
 class DeclarationInfo(object):
 
     def __init__(self, name, origin):
@@ -176,7 +192,8 @@ class ObjectType(RecordType):
 
 class Transpiler(object):
 
-    def __init__(self):
+    def __init__(self, project_name):
+        self._ast = astree.RootNode("mog project '{}'".format(project_name))
         self._messages = []
         self._types = {}
         self._delayed = {}
@@ -218,7 +235,16 @@ class Transpiler(object):
         self.report(TranspilerMessage.ERROR, contents, origin)
 
     def fatal_error(self, contents, origin):
+        raise FatalTranspilerError(contents, origin)
+
+    def _fatal_error(self, contents, origin):
         self.report(TranspilerMessage.FATAL_ERROR, contents, origin)
+
+    def is_success(self):
+        return all([
+            message.type not in (TranspilerMessage.ERROR, TranspilerMessage.FATAL_ERROR)
+            for message in self.messages
+        ])
 
     def ingest_event_definition(self, parent, event_ast):
         if event_ast.event_name in parent.event_names:
@@ -252,9 +278,16 @@ class Transpiler(object):
             if isinstance(child, astree.ObjectNode):
                 self.ingest_object_definition(child)
 
-    def compile(self, ast):
-        self.identify_types_in(ast)
-        self._trigger_delays('object-parenting', self)
+    def ingest_ast(self, ast):
+        for child in ast.children:
+            self._ast.add(child)
+
+    def compile(self):
+        try:
+            self.identify_types_in(self._ast)
+            self._trigger_delays('object-parenting', self)
+        except FatalTranspilerError as err:
+            self._fatal_error(err.contents, err.origin)
 
     def debug_types(self):
         print("debug transpiler type information:")
