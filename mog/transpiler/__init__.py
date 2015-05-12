@@ -16,9 +16,10 @@ class TranspilerMessage(namedtuple('TranspilerMessage', 'type contents origin'))
     FATAL_ERROR = 4
 
     def __str__(self):
-        return "{} [line {}, char {}]: {}".format(
+        return "{} [line {}, char {}] {}: {}".format(
             TranspilerMessage.message_type_string(self.type),
             self.origin.line + 1, self.origin.column + 1,
+            self.origin.source_name,
             self.contents
         )
 

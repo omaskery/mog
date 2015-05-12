@@ -71,9 +71,10 @@ def mog_build(args):
 
     transpiler = mog.transpiler.Transpiler(project_name)
     for filename in filter(lambda x: x.endswith(".mog"), os.listdir(base_path)):
-        print("ingesting {}".format(filename))
         filepath = os.path.join(base_path, filename)
         parse_result = mog.source.parser.parse(open(filepath, 'r'), filename)
+        print("  ast:")
+        print(parse_result.ast.pretty_print(4, 1))
         for message in parse_result.messages:
             print("  parser - {}".format(message))
         if parse_result.is_success():
@@ -84,10 +85,12 @@ def mog_build(args):
     transpiler.compile()
     for message in transpiler.messages:
         print("  compiler - {}".format(message))
+
     transpiler.debug_types()
 
     if parser_success and transpiler.is_success():
-        print("build success")
+        # print("build success")
+        pass
     else:
         print("build unsuccessful")
 

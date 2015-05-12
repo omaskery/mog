@@ -18,9 +18,10 @@ class ParserMessage(namedtuple('ParserMessage', 'type contents origin')):
     FATAL_ERROR = 4
 
     def __str__(self):
-        return "{} [line {}, char {}]: {}".format(
+        return "{} [line {}, char {}] {}: {}".format(
             ParserMessage.message_type_string(self.type),
             self.origin.line + 1, self.origin.column + 1,
+            self.origin.source_name,
             self.contents
         )
 
@@ -54,14 +55,30 @@ class FatalParserError(Exception):
 class IdentifierPredicate(object):
 
     def __init__(self):
-        self.first = True
+        self._first = True
 
     def __call__(self, char):
         allowed = string.ascii_letters + "_"
-        if not self.first:
+        if not self._first:
             allowed += string.digits
-        self.first = False
+        self._first = False
         return char in allowed
+
+
+class StringLiteralPredicate(object):
+
+    def __init__(self):
+        self._ignore = False
+
+    def __call__(self, char):
+        if not self._ignore:
+            if char == '\\':
+                self._ignore = True
+            result = char != '"'
+        else:
+            self._ignore = False
+            result = True
+        return result
 
 
 class Parser(object):
@@ -71,6 +88,20 @@ class Parser(object):
     def __init__(self, src):
         self._result = ParserResult(src.source_name)
         self._src = src
+        self._operators = {
+            '&&': 5,
+            '||': 5,
+            '==': 10,
+            '!=': 10,
+            '<': 20,
+            '>': 20,
+            '<=': 20,
+            '>=': 20,
+            '+': 50,
+            '-': 50,
+            '*': 100,
+            '/': 100,
+        }
 
     @property
     def position(self):
@@ -162,16 +193,171 @@ class Parser(object):
                     self.info(message)
                     break
 
-    def parse_method_body(self, parent):
+    def parse_let_statement(self, parent, start_position):
+        pass
+
+    def parse_if_expression(self, parent, start_position):
+        pass
+
+    def parse_while_expression(self, parent, start_position):
+        pass
+
+    def parse_for_expression(self, parent, start_position):
+        pass
+
+    def parse_numeric_literal(self, parent):
+        position = self.position
+        result = self.consume_while(lambda x: x in string.digits)
+        parent.add(ast.NumericLiteralNode(position, result))
+
+    def parse_string_literal(self, parent):
+        position = self.position
+        if self.peek() != '"':
+            self.error("expected '\"' at start of string literal")
+            self.consume_until(lambda x: x == '"' or x == '\n')
+            self.info("attempted to recover at next '\"' or newline")
+        else:
+            self.get()
+            result = self.consume_while(StringLiteralPredicate())
+            if self.peek() == '"':
+                self.get()
+            parent.add(ast.StringLiteralNode(position, result))
+
+    def parse_operator(self) -> ast.OperatorNode:
+        consumed = ""
+
+        def start_of_operator(x):
+            return any([
+                operator.startswith(x)
+                for operator in self._operators.keys()
+            ])
+
+        self.skip_whitespace()
+        start_position = self.position
+        while start_of_operator(consumed + self.peek()):
+            consumed += self.get()
+
+        if consumed not in self._operators.keys():
+            result = None
+        else:
+            result = ast.OperatorNode(start_position, consumed, self._operators[consumed])
+        return result
+
+    def parse_expression(self, parent):
+        self.skip_whitespace()
+
+        output_stack = ast.Node(self.position)
+        operator_stack = []
+        expecting_operator = False
+        finished = False
+
+        while not finished:
+            peeked = self.peek()
+            if not expecting_operator:
+                if peeked in string.digits:
+                    self.parse_numeric_literal(output_stack)
+                elif peeked == '"':
+                    self.parse_string_literal(output_stack)
+                elif IdentifierPredicate()(peeked):
+                    identifier_start = self.position
+                    identifier = self.parse_identifier()
+                    self.skip_whitespace()
+                    if self.peek() == '(':
+                        self.parse_function_call(identifier, output_stack, identifier_start)
+                    else:
+                        output_stack.add(ast.IdentifierNode(identifier_start, identifier))
+                else:
+                    finished = True
+            else:
+                operator = self.parse_operator()
+                if operator is not None:
+                    while len(operator_stack) > 0 and operator.priority < operator_stack[-1].priority:
+                        popped = operator_stack[-1]
+                        operator_stack = operator_stack[:-1]
+                        popped.pop_operands(output_stack)
+                        output_stack.add(popped)
+                    operator_stack.append(operator)
+                else:
+                    finished = True
+            expecting_operator = not expecting_operator
+            self.skip_whitespace()
+
+        while len(operator_stack) > 0:
+            popped = operator_stack[-1]
+            operator_stack = operator_stack[:-1]
+            popped.pop_operands(output_stack)
+            output_stack.add(popped)
+
+        if len(output_stack.children) != 1:
+            self.error("internal error: shunting algorithm parsing expression resulted in non-1-length output stack")
+        else:
+            parent.add(output_stack.children[-1])
+
+    def parse_function_call(self, identifier, parent, start_position):
+        self.skip_whitespace()
+        call = ast.FunctionCall(start_position, identifier)
+        if self.peek() != '(':
+            self.error("expected '(' for parameter list in function call")
+        else:
+            self.get()
+            self.skip_whitespace()
+            first = True
+            parameter_list = ast.ParameterList(self.position)
+            while self.peek() != ')':
+                if not first:
+                    if self.peek() != ',':
+                        self.error("expected ',' between parameters")
+                    else:
+                        self.get()
+                self.skip_whitespace()
+                self.parse_expression(parameter_list)
+                self.skip_whitespace()
+                first = False
+            self.get()
+            call.add(parameter_list)
+        parent.add(call)
+
+    def parse_assignment(self, identifier, parent, start_position):
+        pass
+
+    def parse_statement(self, parent) -> bool:
+        self.skip_whitespace()
+        start_position = self.position
+        identifier = self.parse_identifier()
+        self.skip_whitespace()
+        if identifier == 'let':
+            self.parse_let_statement(parent, start_position)
+        elif identifier == 'if':
+            self.parse_if_expression(parent, start_position)
+        elif identifier == 'while':
+            self.parse_while_expression(parent, start_position)
+        elif identifier == 'for':
+            self.parse_for_expression(parent, start_position)
+        elif self.peek() == '(':
+            self.parse_function_call(identifier, parent, start_position)
+        elif self.peek() == '=':
+            self.parse_assignment(identifier, parent, start_position)
+        self.skip_whitespace()
+        if self.peek() == ';':
+            self.get()
+            as_expression = False
+        else:
+            as_expression = True
+        return as_expression
+
+    def parse_code_block(self, parent):
         self.skip_whitespace()
         if self.peek() != '{':
             self.error("expected '{' symbol")
-            self.recover_scoped('{', '}', "attempting to resume parsing after bad function body")
+            self.recover_scoped('{', '}', "attempting to resume parsing after bad code block body")
         else:
             self.get()
             self.skip_whitespace()
             while self.peek() != '}':
+                as_expression = self.parse_statement(parent)
                 self.skip_whitespace()
+                if self.peek() != '}' and as_expression:
+                    self.error("a statement without a trailing ';' must be last statement in block")
             self.get()
 
     def parse_method(self, parent, start_position):
@@ -184,7 +370,7 @@ class Parser(object):
         event_name = self.parse_identifier()
         self.skip_whitespace()
         result = ast.EventNode(start_position, event_name)
-        self.parse_method_body(result)
+        self.parse_code_block(result)
         parent.add(result)
 
     def parse_object(self, parent, start_position):
