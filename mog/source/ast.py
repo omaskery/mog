@@ -110,6 +110,55 @@ class EventNode(Node):
         return "event handler '{}'".format(self.event_name)
 
 
+class LetNode(Node):
+
+    def __init__(self, origin, variable_name):
+        super().__init__(origin)
+        self._variable_name = variable_name
+
+    @property
+    def variable_name(self):
+        return self._variable_name
+
+    @property
+    def type(self):
+        if len(self.children) > 1:
+            return self.children[0]
+        else:
+            return None
+
+    @property
+    def expression(self):
+        if len(self.children) > 0:
+            return self.children[-1]
+        else:
+            return None
+
+    def __str__(self):
+        return "let statement of '{}'".format(self.variable_name)
+
+
+class AssignmentNode(Node):
+
+    def __init__(self, origin, destination):
+        super().__init__(origin)
+        self._destination = destination
+
+    @property
+    def destination(self):
+        return self._destination
+
+    @property
+    def expression(self):
+        if len(self.children) > 0:
+            return self.children[0]
+        else:
+            return None
+
+    def __str__(self):
+        return "assignment to '{}'".format(self.destination)
+
+
 class FunctionCall(Node):
 
     def __init__(self, origin, function_name):
@@ -136,6 +185,20 @@ class IdentifierNode(Node):
 
     def __str__(self):
         return "identifier '{}'".format(self.name)
+
+
+class TypeNode(Node):
+
+    def __init__(self, origin, name):
+        super().__init__(origin)
+        self._name = name
+
+    @property
+    def name(self):
+        return self._name
+
+    def __str__(self):
+        return "type '{}'".format(self.name)
 
 
 class LiteralNode(Node):
@@ -169,6 +232,43 @@ class StringLiteralNode(LiteralNode):
         super().__init__(origin, "string", value)
 
 
+class MemberNode(Node):
+
+    def __init__(self, origin, name):
+        super().__init__(origin)
+        self._name = name
+
+    @property
+    def name(self):
+        return self._name
+
+    @property
+    def type(self):
+        if len(self.children) > 0:
+            return self.children[0]
+        else:
+            return None
+
+    @property
+    def expression(self):
+        if len(self.children) > 1:
+            return self.children[1]
+        else:
+            return None
+
+    def __str__(self):
+        return "member '{}'".format(self.name)
+
+
+class CodeBlock(Node):
+
+    def __init__(self, origin):
+        super().__init__(origin)
+
+    def __str__(self):
+        return "code block"
+
+
 class OperatorNode(Node):
 
     def __init__(self, origin, operator, priority, operand_count=2):
@@ -198,7 +298,63 @@ class OperatorNode(Node):
         return "operator {}".format(self.operator)
 
 
-class ParameterList(Node):
+class MethodNode(Node):
+
+    def __init__(self, origin, name):
+        super().__init__(origin)
+        self._name = name
+
+    @property
+    def name(self):
+        return self._name
+
+    @property
+    def parameters(self):
+        if len(self.children) > 0:
+            return self.children[0]
+        else:
+            return None
+
+    @property
+    def return_type(self):
+        if len(self.children) > 2:
+            return self.children[1]
+        else:
+            return None
+
+    @property
+    def code_block(self):
+        if len(self.children) > 1:
+            return self.children[-1]
+        else:
+            return None
+
+    def __str__(self):
+        return "method '{}'".format(self.name)
+
+
+class ParameterNode(Node):
+
+    def __init__(self, origin, name):
+        super().__init__(origin)
+        self._name = name
+
+    @property
+    def name(self):
+        return self._name
+
+    @property
+    def type(self):
+        if len(self.children) > 0:
+            return self.children[0]
+        else:
+            return None
+
+    def __str__(self):
+        return "parameter '{}'".format(self.name)
+
+
+class ParameterListNode(Node):
 
     def __init__(self, origin):
         super().__init__(origin)

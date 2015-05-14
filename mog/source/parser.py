@@ -193,8 +193,31 @@ class Parser(object):
                     self.info(message)
                     break
 
+    def parse_type(self, parent):
+        start_position = self.position
+        typename = self.parse_identifier()
+        if typename == "":
+            self.error("expected an identifier")
+        parent.add(ast.TypeNode(start_position, typename))
+
     def parse_let_statement(self, parent, start_position):
-        pass
+        self.skip_whitespace()
+        name = self.parse_identifier()
+        self.skip_whitespace()
+        let_node = ast.LetNode(start_position, name)
+        if self.peek() == ':':
+            self.get()
+            self.skip_whitespace()
+            self.parse_type(let_node)
+            self.skip_whitespace()
+        if self.peek() != '=':
+            self.error("expected '=' sign in let statement")
+            self.consume_until(lambda x: x == ';' or x == '\n')
+            self.info("attempted to recover at next ';' or newline")
+        else:
+            self.get()
+            self.parse_expression(let_node)
+            parent.add(let_node)
 
     def parse_if_expression(self, parent, start_position):
         pass
@@ -302,7 +325,7 @@ class Parser(object):
             self.get()
             self.skip_whitespace()
             first = True
-            parameter_list = ast.ParameterList(self.position)
+            parameter_list = ast.ParameterListNode(self.position)
             while self.peek() != ')':
                 if not first:
                     if self.peek() != ',':
@@ -318,7 +341,16 @@ class Parser(object):
         parent.add(call)
 
     def parse_assignment(self, identifier, parent, start_position):
-        pass
+        if self.peek() != '=':
+            self.error("expected '=' after identifier in assignment")
+            self.consume_until(lambda x: x == ';' or x == '\n')
+            self.info("attempted to recover at next ';' or newline")
+        else:
+            self.get()
+            self.skip_whitespace()
+            assignment = ast.AssignmentNode(start_position, identifier)
+            self.parse_expression(assignment)
+            parent.add(assignment)
 
     def parse_statement(self, parent) -> bool:
         self.skip_whitespace()
@@ -346,7 +378,9 @@ class Parser(object):
         return as_expression
 
     def parse_code_block(self, parent):
+        as_expression = False
         self.skip_whitespace()
+        code_block = ast.CodeBlock(self.position)
         if self.peek() != '{':
             self.error("expected '{' symbol")
             self.recover_scoped('{', '}', "attempting to resume parsing after bad code block body")
@@ -354,17 +388,85 @@ class Parser(object):
             self.get()
             self.skip_whitespace()
             while self.peek() != '}':
-                as_expression = self.parse_statement(parent)
+                as_expression = self.parse_statement(code_block)
                 self.skip_whitespace()
                 if self.peek() != '}' and as_expression:
                     self.error("a statement without a trailing ';' must be last statement in block")
             self.get()
+        parent.add(code_block)
+        return as_expression
 
     def parse_method(self, parent, start_position):
-        pass
+        self.skip_whitespace()
+        name = self.parse_identifier()
+        if name == "":
+            self.error("expected identifier after method keyword")
+            self.recover_scoped('{', '}', "attempting to resume parsing after bad method declaration", 0)
+        else:
+            method = ast.MethodNode(start_position, name)
+            self.skip_whitespace()
+            parameters = ast.ParameterListNode(self.position)
+            if self.peek() != '(':
+                self.error("expected '(' after method name")
+                self.recover_scoped('(', ')', "attempting to resume parsing after bad method declaration")
+            else:
+                self.get()
+                self.skip_whitespace()
+                first = True
+                while self.peek() != ')':
+                    if not first:
+                        if self.peek() != ',':
+                            self.error("expected ',' between parameters")
+                        else:
+                            self.get()
+                    start_position = self.position
+                    name = self.parse_identifier()
+                    argument = ast.ParameterNode(start_position, name)
+                    if name == "":
+                        self.error("expected identifier to name parameter")
+                        self.consume_until(lambda x: x == ',' or x == ')')
+                        self.info("attempted to recover at next ',' or ');")
+                    else:
+                        self.skip_whitespace()
+                        if self.peek() != ':':
+                            self.error("expected ':' after parameter name")
+                        else:
+                            self.get()
+                        self.parse_type(argument)
+                    parameters.add(argument)
+                    first = False
+                    self.skip_whitespace()
+                self.get()
+            method.add(parameters)
+            self.skip_whitespace()
+            if self.peek() == ':':
+                self.get()
+                self.parse_type(method)
+            self.parse_code_block(method)
+            parent.add(method)
 
     def parse_member(self, parent, start_position):
-        pass
+        self.skip_whitespace()
+        name = self.parse_identifier()
+        self.skip_whitespace()
+        member = ast.MemberNode(start_position, name)
+        if self.peek() != ':':
+            self.error("expected ':' identifier after member name")
+            self.consume_until(lambda x: x == ';' or x == "\n")
+            self.info("attempted to recover at next ';' or newline")
+        else:
+            self.get()
+            self.parse_type(member)
+            self.skip_whitespace()
+            if self.peek() == '=':
+                self.get()
+                self.parse_expression(member)
+        self.skip_whitespace()
+        if self.peek() != ';':
+            self.error("expected ';' after member declaration")
+        else:
+            self.get()
+        parent.add(member)
 
     def parse_event(self, parent, start_position):
         event_name = self.parse_identifier()
