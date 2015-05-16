@@ -181,18 +181,6 @@ class Parser(object):
     def get(self) -> str:
         return self._src.get()
 
-    def recover_scoped(self, scope_open, scope_close, message, initial_scope = 1):
-        scope = initial_scope
-        while self.peek() is not None:
-            next = self.get()
-            if next == scope_open:
-                scope += 1
-            elif next == scope_close:
-                scope -= 1
-                if scope <= 0:
-                    self.info(message)
-                    break
-
     def parse_type(self, parent):
         start_position = self.position
         typename = self.parse_identifier()
@@ -212,12 +200,10 @@ class Parser(object):
             self.skip_whitespace()
         if self.peek() != '=':
             self.error("expected '=' sign in let statement")
-            self.consume_until(lambda x: x == ';' or x == '\n')
-            self.info("attempted to recover at next ';' or newline")
         else:
             self.get()
-            self.parse_expression(let_node)
-            parent.add(let_node)
+        self.parse_expression(let_node)
+        parent.add(let_node)
 
     def parse_if_expression(self, parent, start_position):
         pass
@@ -237,14 +223,12 @@ class Parser(object):
         position = self.position
         if self.peek() != '"':
             self.error("expected '\"' at start of string literal")
-            self.consume_until(lambda x: x == '"' or x == '\n')
-            self.info("attempted to recover at next '\"' or newline")
         else:
             self.get()
-            result = self.consume_while(StringLiteralPredicate())
-            if self.peek() == '"':
-                self.get()
-            parent.add(ast.StringLiteralNode(position, result))
+        result = self.consume_while(StringLiteralPredicate())
+        if self.peek() == '"':
+            self.get()
+        parent.add(ast.StringLiteralNode(position, result))
 
     def parse_operator(self) -> ast.OperatorNode:
         consumed = ""
@@ -264,6 +248,7 @@ class Parser(object):
             result = None
         else:
             result = ast.OperatorNode(start_position, consumed, self._operators[consumed])
+
         return result
 
     def parse_expression(self, parent):
@@ -272,6 +257,7 @@ class Parser(object):
         output_stack = ast.Node(self.position)
         operator_stack = []
         expecting_operator = False
+        value_expected = True
         finished = False
 
         while not finished:
@@ -290,6 +276,8 @@ class Parser(object):
                     else:
                         output_stack.add(ast.IdentifierNode(identifier_start, identifier))
                 else:
+                    if value_expected:
+                        self.error("expected another value after last operator")
                     finished = True
             else:
                 operator = self.parse_operator()
@@ -300,6 +288,7 @@ class Parser(object):
                         popped.pop_operands(output_stack)
                         output_stack.add(popped)
                     operator_stack.append(operator)
+                    value_expected = True
                 else:
                     finished = True
             expecting_operator = not expecting_operator
@@ -323,34 +312,32 @@ class Parser(object):
             self.error("expected '(' for parameter list in function call")
         else:
             self.get()
+        self.skip_whitespace()
+        first = True
+        parameter_list = ast.ParameterListNode(self.position)
+        while self.peek() != ')':
+            if not first:
+                if self.peek() != ',':
+                    self.error("expected ',' between parameters")
+                else:
+                    self.get()
             self.skip_whitespace()
-            first = True
-            parameter_list = ast.ParameterListNode(self.position)
-            while self.peek() != ')':
-                if not first:
-                    if self.peek() != ',':
-                        self.error("expected ',' between parameters")
-                    else:
-                        self.get()
-                self.skip_whitespace()
-                self.parse_expression(parameter_list)
-                self.skip_whitespace()
-                first = False
-            self.get()
-            call.add(parameter_list)
+            self.parse_expression(parameter_list)
+            self.skip_whitespace()
+            first = False
+        self.get()
+        call.add(parameter_list)
         parent.add(call)
 
     def parse_assignment(self, identifier, parent, start_position):
         if self.peek() != '=':
             self.error("expected '=' after identifier in assignment")
-            self.consume_until(lambda x: x == ';' or x == '\n')
-            self.info("attempted to recover at next ';' or newline")
         else:
             self.get()
-            self.skip_whitespace()
-            assignment = ast.AssignmentNode(start_position, identifier)
-            self.parse_expression(assignment)
-            parent.add(assignment)
+        self.skip_whitespace()
+        assignment = ast.AssignmentNode(start_position, identifier)
+        self.parse_expression(assignment)
+        parent.add(assignment)
 
     def parse_statement(self, parent) -> bool:
         self.skip_whitespace()
@@ -383,16 +370,15 @@ class Parser(object):
         code_block = ast.CodeBlock(self.position)
         if self.peek() != '{':
             self.error("expected '{' symbol")
-            self.recover_scoped('{', '}', "attempting to resume parsing after bad code block body")
         else:
             self.get()
+        self.skip_whitespace()
+        while self.peek() != '}':
+            as_expression = self.parse_statement(code_block)
             self.skip_whitespace()
-            while self.peek() != '}':
-                as_expression = self.parse_statement(code_block)
-                self.skip_whitespace()
-                if self.peek() != '}' and as_expression:
-                    self.error("a statement without a trailing ';' must be last statement in block")
-            self.get()
+            if self.peek() != '}' and as_expression:
+                self.error("a statement without a trailing ';' must be last statement in block")
+        self.get()
         parent.add(code_block)
         return as_expression
 
@@ -401,49 +387,44 @@ class Parser(object):
         name = self.parse_identifier()
         if name == "":
             self.error("expected identifier after method keyword")
-            self.recover_scoped('{', '}', "attempting to resume parsing after bad method declaration", 0)
+        method = ast.MethodNode(start_position, name)
+        self.skip_whitespace()
+        parameters = ast.ParameterListNode(self.position)
+        if self.peek() != '(':
+            self.error("expected '(' after method name")
         else:
-            method = ast.MethodNode(start_position, name)
-            self.skip_whitespace()
-            parameters = ast.ParameterListNode(self.position)
-            if self.peek() != '(':
-                self.error("expected '(' after method name")
-                self.recover_scoped('(', ')', "attempting to resume parsing after bad method declaration")
+            self.get()
+        self.skip_whitespace()
+        first = True
+        while self.peek() != ')':
+            if not first:
+                if self.peek() != ',':
+                    self.error("expected ',' between parameters")
+                else:
+                    self.get()
+            start_position = self.position
+            name = self.parse_identifier()
+            argument = ast.ParameterNode(start_position, name)
+            if name == "":
+                self.error("expected identifier to name parameter")
             else:
-                self.get()
                 self.skip_whitespace()
-                first = True
-                while self.peek() != ')':
-                    if not first:
-                        if self.peek() != ',':
-                            self.error("expected ',' between parameters")
-                        else:
-                            self.get()
-                    start_position = self.position
-                    name = self.parse_identifier()
-                    argument = ast.ParameterNode(start_position, name)
-                    if name == "":
-                        self.error("expected identifier to name parameter")
-                        self.consume_until(lambda x: x == ',' or x == ')')
-                        self.info("attempted to recover at next ',' or ');")
-                    else:
-                        self.skip_whitespace()
-                        if self.peek() != ':':
-                            self.error("expected ':' after parameter name")
-                        else:
-                            self.get()
-                        self.parse_type(argument)
-                    parameters.add(argument)
-                    first = False
-                    self.skip_whitespace()
-                self.get()
-            method.add(parameters)
+                if self.peek() != ':':
+                    self.error("expected ':' after parameter name")
+                else:
+                    self.get()
+                self.parse_type(argument)
+            parameters.add(argument)
+            first = False
             self.skip_whitespace()
-            if self.peek() == ':':
-                self.get()
-                self.parse_type(method)
-            self.parse_code_block(method)
-            parent.add(method)
+        self.get()
+        method.add(parameters)
+        self.skip_whitespace()
+        if self.peek() == ':':
+            self.get()
+            self.parse_type(method)
+        self.parse_code_block(method)
+        parent.add(method)
 
     def parse_member(self, parent, start_position):
         self.skip_whitespace()
@@ -452,15 +433,13 @@ class Parser(object):
         member = ast.MemberNode(start_position, name)
         if self.peek() != ':':
             self.error("expected ':' identifier after member name")
-            self.consume_until(lambda x: x == ';' or x == "\n")
-            self.info("attempted to recover at next ';' or newline")
         else:
             self.get()
-            self.parse_type(member)
-            self.skip_whitespace()
-            if self.peek() == '=':
-                self.get()
-                self.parse_expression(member)
+        self.parse_type(member)
+        self.skip_whitespace()
+        if self.peek() == '=':
+            self.get()
+            self.parse_expression(member)
         self.skip_whitespace()
         if self.peek() != ';':
             self.error("expected ';' after member declaration")
@@ -487,27 +466,25 @@ class Parser(object):
 
         if self.peek() != '{':
             self.error('expected "{" symbol')
-            self.recover_scoped('{', '}', "attempting to resume parsing after bad object definition")
         else:
             self.get()
+        self.skip_whitespace()
+        obj = ast.ObjectNode(start_position, object_name, parent_name)
+        while self.peek() != '}':
+            position = self.position
+            identifier = self.parse_identifier()
+            if identifier == 'method':
+                self.parse_method(obj, position)
+            elif identifier == 'member':
+                self.parse_member(obj, position)
+            elif identifier == 'event':
+                self.parse_event(obj, position)
+            else:
+                self.error("unexpected identifier '{}'".format(identifier))
             self.skip_whitespace()
-            obj = ast.ObjectNode(start_position, object_name, parent_name)
-            while self.peek() != '}':
-                position = self.position
-                identifier = self.parse_identifier()
-                if identifier == 'method':
-                    self.parse_method(obj, position)
-                elif identifier == 'member':
-                    self.parse_member(obj, position)
-                elif identifier == 'event':
-                    self.parse_event(obj, position)
-                else:
-                    self.error("unexpected identifier '{}'".format(identifier))
-                    self.recover_scoped("{", "}", "attempting to resume parsing after bad method/member/event definition", 0)
-                self.skip_whitespace()
-            if self.peek() == "}":
-                self.get()
-            parent.add(obj)
+        if self.peek() == "}":
+            self.get()
+        parent.add(obj)
 
     def parse_global(self, parent):
         self.skip_whitespace(True)
