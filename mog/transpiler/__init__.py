@@ -3,6 +3,7 @@ this package provides the the custom language transpiling within mog
 """
 
 
+from .. import gamemaker
 from ..source import ast as astree
 from collections import namedtuple
 
@@ -52,9 +53,9 @@ class FatalTranspilerError(Exception):
 
 class DeclarationInfo(object):
 
-    def __init__(self, name, origin):
+    def __init__(self, name, ast):
         self._name = name
-        self._origin = origin
+        self._ast = ast
 
     @property
     def name(self):
@@ -62,7 +63,11 @@ class DeclarationInfo(object):
 
     @property
     def origin(self):
-        return self._origin.clone()
+        return self._ast.origin.clone()
+
+    @property
+    def ast(self):
+        return self._ast
 
 
 class Type(object):
@@ -83,7 +88,7 @@ class RecordType(Type):
     def __init__(self, name, origin):
         super().__init__(name)
         self._origin = origin
-        self._fields = {}
+        self._members = {}
         self._methods = {}
         self._parent = None
 
@@ -99,14 +104,14 @@ class RecordType(Type):
         return self._origin.clone()
 
     @property
-    def field_names(self):
-        return self._fields.keys()
+    def member_names(self):
+        return self._members.keys()
 
-    def field_info(self, field_name):
-        return self._fields[field_name]
+    def member_info(self, field_name):
+        return self._members[field_name]
 
-    def add_field(self, field_info):
-        self._fields[field_info.name] = field_info
+    def add_member(self, field_info):
+        self._members[field_info.name] = field_info
 
     @property
     def method_names(self):
@@ -124,8 +129,8 @@ class RecordType(Type):
         methods = ""
         if self.parent is not None:
             parent = " parent: {}".format(self.parent.name)
-        if len(self._fields) > 0:
-            fields = "fields: {}".format(", ".join(self.field_names))
+        if len(self._members) > 0:
+            fields = "fields: {}".format(", ".join(self.member_names))
         if len(self._methods) > 0:
             methods = "methods: {}".format(", ".join(self.method_names))
         details = ""
@@ -144,8 +149,20 @@ class RecordType(Type):
 
 class EventDeclarationInfo(DeclarationInfo):
 
-    def __init__(self, name, origin):
-        super().__init__(name, origin)
+    def __init__(self, name, ast):
+        super().__init__(name, ast)
+
+
+class MethodDeclarationInfo(DeclarationInfo):
+
+    def __init__(self, name, ast):
+        super().__init__(name, ast)
+
+
+class MemberDeclarationInfo(DeclarationInfo):
+
+    def __init__(self, name, ast):
+        super().__init__(name, ast)
 
 
 class ObjectType(RecordType):
@@ -171,8 +188,8 @@ class ObjectType(RecordType):
         events = ""
         if self.parent is not None:
             parent = " parent: {}".format(self.parent.name)
-        if len(self._fields) > 0:
-            fields = "fields: {}".format(", ".join(self.field_names))
+        if len(self._members) > 0:
+            fields = "fields: {}".format(", ".join(self.member_names))
         if len(self._methods) > 0:
             methods = "methods: {}".format(", ".join(self.method_names))
         if len(self._events) > 0:
@@ -247,21 +264,37 @@ class Transpiler(object):
             for message in self.messages
         ])
 
-    def ingest_event_definition(self, parent, event_ast):
-        if event_ast.event_name in parent.event_names:
-            self.error("object {} already has event definition for {} at {}".format(
-                parent.name, event_ast.event_name, parent.event_info(event_ast.event_name).origin
-            ), event_ast.origin)
-        else:
-            parent.add_event(EventDeclarationInfo(event_ast.event_name, event_ast.origin))
-
     def _parent_objects(self, child, parent_name):
         if parent_name in self._types and isinstance(self._types[parent_name], ObjectType):
             child.set_parent(self._types[parent_name])
         else:
             self.error("parent type {} does not exist".format(parent_name), child.origin)
 
-    def ingest_object_definition(self, object_ast):
+    def ingest_event_definition(self, parent, event_ast):
+        if event_ast.event_name in parent.event_names:
+            self.error("object {} already has event definition for {} at {}".format(
+                parent.name, event_ast.event_name, parent.event_info(event_ast.event_name).origin
+            ), event_ast.origin)
+        else:
+            parent.add_event(EventDeclarationInfo(event_ast.event_name, event_ast))
+
+    def _ingest_method_definition(self, parent, method_ast):
+        if method_ast.name in parent.method_names:
+            self.error("object {} already has method definition for {} at {}".format(
+                parent.name, method_ast.name, parent.method_info(method_ast.name).origin
+            ), method_ast.origin)
+        else:
+            parent.add_method(MethodDeclarationInfo(method_ast.name, method_ast))
+
+    def _ingest_member_definition(self, parent, member_ast):
+        if member_ast.name in parent.member_names:
+            self.error("object {} already has method definition for {} at {}".format(
+                parent.name, member_ast.name, parent.method_info(member_ast.name).origin
+            ), member_ast.origin)
+        else:
+            parent.add_member(MemberDeclarationInfo(member_ast.name, member_ast))
+
+    def _ingest_object_definition(self, object_ast):
         obj = ObjectType(object_ast.name, object_ast.origin)
         if obj.name in self._types:
             existing_definition = self._types[obj.name].origin
@@ -273,20 +306,66 @@ class Transpiler(object):
             for child in object_ast.children:
                 if isinstance(child, astree.EventNode):
                     self.ingest_event_definition(obj, child)
+                elif isinstance(child, astree.MethodNode):
+                    self._ingest_method_definition(obj, child)
+                elif isinstance(child, astree.MemberNode):
+                    self._ingest_member_definition(obj, child)
 
     def identify_types_in(self, ast):
         for child in ast.children:
             if isinstance(child, astree.ObjectNode):
-                self.ingest_object_definition(child)
+                self._ingest_object_definition(child)
 
     def ingest_ast(self, ast):
         for child in ast.children:
             self._ast.add(child)
 
-    def compile(self):
+    def _compile_expression(self, origin, type_ast, value_ast):
+        if type_ast is None:
+            self.error("member missing type information", origin)
+        else:
+            
+
+    def _compile_code(self, this_obj, is_create_event, ast, comment):
+        result = "///{}\n".format(comment)
+        result += "// automatically generated by mog\n"
+
+        if is_create_event:
+            result += "\n// initialising member variables\n"
+            for member_name in this_obj.member_names:
+                member_info = this_obj.member_info(member_name)
+                expression = self._compile_expression(member_info.origin, member_info.ast.type, member_info.ast.value)
+                if expression is not None:
+                    result += "{} = {}\n".format(
+                        member_name, expression
+                    )
+
+        return result
+
+    def _compile_object(self, obj, gm_project):
+        gm_object = gm_project.create_or_fetch_object(obj.name)
+        for event_name in obj.event_names:
+            event_decl = obj.event_info(event_name)
+            if event_name not in EVENT_NAME_MAPPING:
+                self.error("'{}' is not a valid event name".format(event_name), event_decl.origin)
+                continue
+            event_type, event_number = EVENT_NAME_MAPPING[event_name]
+            gm_event = gm_object.create_or_fetch_event(event_type, event_number)
+            code = self._compile_code(obj, event_name == "create", event_decl.ast.code_block, event_name)
+            gm_event.set_code_action(code)
+        gm_object.save()
+
+    def _compile_objects(self, gm_project):
+        for obj in self._types.values():
+            if not isinstance(obj, ObjectType):
+                continue
+            self._compile_object(obj, gm_project)
+
+    def compile(self, gm_project):
         try:
             self.identify_types_in(self._ast)
             self._trigger_delays('object-parenting', self)
+            self._compile_objects(gm_project)
         except FatalTranspilerError as err:
             self._fatal_error(err.contents, err.origin)
 
@@ -294,3 +373,10 @@ class Transpiler(object):
         print("debug transpiler type information:")
         for info in self._types.values():
             print("  {}".format(info))
+
+
+EVENT_NAME_MAPPING = {
+    'create': (gamemaker.project.EVENT_TYPE_CREATE, 0),
+    'destroy': (gamemaker.project.EVENT_TYPE_DESTROY, 0),
+    'step': (gamemaker.project.EVENT_TYPE_STEP, 0),
+}

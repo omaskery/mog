@@ -106,6 +106,13 @@ class EventNode(Node):
     def event_name(self):
         return self._event_name
 
+    @property
+    def code_block(self):
+        if len(self.children) > 0:
+            return self.children[0]
+        else:
+            return None
+
     def __str__(self):
         return "event handler '{}'".format(self.event_name)
 

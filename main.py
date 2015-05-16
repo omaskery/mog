@@ -47,13 +47,6 @@ def mog_scan(args):
         if not os.path.exists(object_path):
             print("  generating mog file for game maker object {}".format(object.name))
             mog.source.generator.generate_object_file(base_path, object)
-        else:
-            parse_result = mog.source.parser.parse(open(object_path, 'r'), object_path)
-            print("  existing mog file:\n    ast:\n{}".format(parse_result.ast.pretty_print(3, 2)))
-            if len(parse_result.messages) > 0:
-                print("    parser output:")
-                for message in parse_result.messages:
-                    print("      {}".format(message))
 
 
 def mog_build(args):
@@ -69,6 +62,7 @@ def mog_build(args):
     project_name = project.project_file.project_name
     parser_success = True
 
+    gm_project = mog.gamemaker.project.Project(project.project_file.gamemaker_project_path)
     transpiler = mog.transpiler.Transpiler(project_name)
     for filename in filter(lambda x: x.endswith(".mog"), os.listdir(base_path)):
         filepath = os.path.join(base_path, filename)
@@ -82,7 +76,7 @@ def mog_build(args):
         else:
             parser_success = False
 
-    transpiler.compile()
+    transpiler.compile(gm_project)
     for message in transpiler.messages:
         print("  compiler - {}".format(message))
 
